@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>知识图谱 - Neo4j数据</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.3.2/dist/echarts.min.js"></script>
+  <style>
+    #mynetwork {
+      width: 100%;
+      height: 100vh;
+      border: 1px solid lightgray;
+      overflow: auto;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      padding: 0;
+      list-style: none;
+    }
+
+    .legend-circle {
+      display: flex;
+      align-items: center;
+      margin-right: 10px;
+    }
+
+    .color-box {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      margin-right: 5px;
+      border-radius: 50%;
+    }
+
+    .button {
+      padding: 10px 20px;
+      font-size: 16px;
+      font-weight: bold;
+      color: white;
+      background-color: #7fa7d3;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      outline: none;
+      transition: background-color 0.3s;
+      margin-left: auto;
+    }
+
+    .button:hover {
+      background-color: #0056b3;
+    }
+
+    .button:active {
+      background-color: #004085;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="legend">
+    <div class="legend-circle">
+      <div class="color-box" style="background-color: #33a02c;"></div>
+      <span>并发症</span>
+    </div>
+    <div class="legend-circle">
+      <div class="color-box" style="background-color: #e41a1c;"></div>
+      <span>疾病病种</span>
+    </div>
+    <button id="fetchData" class="button">点击获取数据</button>
+  </div>
+  <div id="mynetwork"></div>
+  <button id="nextButton" class="button" style="display:none;">下一步</button>
+
+  <script>
+    let currentCenterNodeId = null;
+    let nodeVisibilityMap = {};
+    let selectedNodeCount = 0;
+
+    document.getElementById('fetchData').addEventListener('click', async () => {
+      const url = 'http://localhost:3005/dataSingleNodes';
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Fetched data:', data);
+
+          const nodes = data.nodes.map(node => ({
+            id: node.id,
+            name: node.name,
+            itemStyle: node.itemStyle || {},
+            value: 10,
+            symbolSize: 40,
+            label: {
+              show: true,
+              fontSize: 10,
+            }
+          }));
+
+          const edges = data.edges.map(edge => ({
+            source: edge.source,
+            target: edge.target
+          }));
+
+          const chartDom = document.getElementById('mynetwork');
+          const myChart = echarts.init(chartDom);
+
+          const option = {
+            title: {
+              text: '疾病诊断知识图谱',
+              subtext: '展开的节点代表您可能患的疾病',
+              left: 'center'
+            },
+            tooltip: {
+              formatter: '{b}'
+            },
+            series: [{
+              type: 'graph',
+              layout: 'force',
+              symbolSize: 40,
+              roam: true,
+              draggable: true,
+              label: {
+                show: true
+              },
+              edgeSymbol: ['none', 'arrow'],
+              edgeSymbolSize: [4, 10],
+              data: nodes,
+              links: edges,
+              force: {
+                repulsion: 180,  // 减小斥力（中心节点与中心节点之间的距离）
+                gravity: 0.08,     // 增加重力，拉近节点
+                edgeLength: 130,   // 缩短连接边的长度
+                layoutAnimation: false
+              },
+              lineStyle: {
+                color: 'source',
+                curveness: 0.3
+              },
+              emphasis: {
+                itemStyle: {
+                  color: 'yellow'
+                }
+              }
+            }]
+          };
+
+          myChart.setOption(option);
+
+          myChart.on('click', function (params) {
+            const clickedNodeId = params.data.id;
+
+            if (nodeVisibilityMap[clickedNodeId]) {
+              nodeVisibilityMap[clickedNodeId] = false;
+              selectedNodeCount--;
+            } else {
+              nodeVisibilityMap[clickedNodeId] = true;
+              selectedNodeCount++;
+            }
+
+            const updatedNodes = nodes.map(node => {
+              if (node.id === clickedNodeId) {
+                node.itemStyle = nodeVisibilityMap[clickedNodeId] ? { color: 'red' } : {};
+              }
+              return node;
+            });
+
+            // 更新布局并保持紧凑的中心节点间距
+            myChart.setOption({
+              series: [{
+                type: 'graph',
+                layout: 'force',
+                symbolSize: 80,
+                roam: true,
+                draggable: true,
+                label: {
+                  show: true
+                },
+                edgeSymbol: ['none', 'arrow'],
+                edgeSymbolSize: [4, 10],
+                data: updatedNodes,
+                links: edges,
+                force: {
+                  repulsion: 200,  // 保持较小的斥力
+                  gravity: 0.1,     // 保持适当的重力
+                  edgeLength: 140,   // 缩短边长以使节点间距更紧凑
+                  layoutAnimation: false
+                },
+                lineStyle: {
+                  color: 'source',
+                  curveness: 0.3
+                },
+                emphasis: {
+                  itemStyle: {
+                    color: 'yellow'
+                  }
+                }
+              }]
+            });
+
+            if (selectedNodeCount === 3) {
+              document.getElementById('nextButton').style.display = 'block';
+            } else {
+              document.getElementById('nextButton').style.display = 'none';
+            }
+          });
+        } else {
+          console.error('数据获取失败');
+        }
+      } catch (error) {
+        console.error('请求出错', error);
+      }
+    });
+
+    async function sendNodeDataToBackend(nodeId) {
+      const backendUrl = 'your_backend_api_url';
+      try {
+        const response = await fetch(backendUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ nodeId: nodeId })
+        });
+        if (response.ok) {
+          const result = await response.json();
+          console.log('数据发送成功，后端返回:', result);
+        } else {
+          console.error('数据发送到后端失败');
+        }
+      } catch (error) {
+        console.error('发送数据请求出错', error);
+      }
+    }
+
+    document.getElementById('nextButton').addEventListener('click', function () {
+      console.log('点击了下一步按钮');
+    });
+  </script>
+</body>
+
+</html>

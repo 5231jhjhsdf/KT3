@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect to Neo4j</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.3.2/dist/echarts.min.js"></script>
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+    }
+
+    #mynetwork {
+      width: 100%;
+      height: 100%;
+      border: 1px solid lightgray;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      padding: 0;
+      list-style: none;
+      margin-bottom: 20px;
+    }
+
+    .legend-circle {
+      display: flex;
+      align-items: center;
+      margin-right: 10px;
+    }
+
+    .color-box {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      margin-right: 5px;
+      border-radius: 50%;
+    }
+
+    .button {
+      padding: 10px 20px;
+      font-size: 16px;
+      font-weight: bold;
+      color: white;
+      background-color: #7fa7d3;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      outline: none;
+      transition: background-color 0.3s;
+      margin-left: auto;
+    }
+
+    .button:hover {
+      background-color: #0056b3;
+    }
+
+    .button:active {
+      background-color: #004085;
+    }
+
+    .legend {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="legend">
+    <div class="legend-circle">
+      <div class="color-box" style="background-color: #33a02c;"></div>
+      <span>并发症</span>
+    </div>
+    <div class="legend-circle">
+      <div class="color-box" style="background-color: #e41a1c;"></div>
+      <span>疾病病种</span>
+    </div>
+    <button id="fetchData" class="button">点击获取数据</button>
+  </div>
+  <div id="mynetwork"></div>
+  <script>
+    let currentCenterNodeId = null;
+    let nodeVisibilityMap = {};
+
+    document.getElementById('fetchData').addEventListener('click', async () => {
+      const url = 'http://localhost:3005/d1';
+      try {
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Fetched data:', data);
+          const nodes = data.nodes.map(node => ({
+            id: node.id,
+            name: node.name,
+            itemStyle: node.itemStyle,
+            value: 10,
+            symbolSize: 30,
+            label: {
+              show: true,
+              fontSize: 10,
+              color: 'black'
+            }
+          }));
+          const edges = data.edges.map(edge => ({
+            source: edge.source,
+            target: edge.target
+          }));
+          const chartDom = document.getElementById('mynetwork');
+          const myChart = echarts.init(chartDom);
+          const option = {
+            title: {
+              text: '疾病诊断知识图谱',
+              subtext: '展开的节点代表您可能患的疾病',
+              left: 'center'
+            },
+            tooltip: {
+              formatter: '{b}'
+            },
+            series: [{
+              type: 'graph',
+              layout: 'force',
+              symbolSize: 30,
+              roam: true,
+              label: {
+                show: true
+              },
+              edgeSymbol: ['none', 'arrow'],
+              edgeSymbolSize: [4, 10],
+              data: nodes,
+              links: edges,
+              force: {
+                // 降低斥力，使节点间距离更稳定
+                repulsion: 80,
+                // 适当增加引力，减少节点过度分散
+                gravity: 0.1,
+                // 减小边的长度，使节点布局更紧凑
+                edgeLength: 60,
+                // 启用布局动画，但减慢动画速度
+                layoutAnimation: true,
+                layoutAnimationDuration: 1000,
+                layoutAnimationEasing: 'cubicInOut',
+                // 增加摩擦力，进一步减少节点抖动
+                friction: 0.95
+              },
+              lineStyle: {
+                color: 'source',
+                curveness: 0.3
+              }
+            }]
+          };
+          myChart.setOption(option);
+
+          myChart.on('click', function (params) {
+            const clickedNodeId = params.data.id;
+
+            if (currentCenterNodeId === clickedNodeId) {
+              const relatedNodes = edges.filter(edge => edge.source === currentCenterNodeId || edge.target === currentCenterNodeId);
+              relatedNodes.forEach(edge => {
+                const targetNodeId = edge.source === currentCenterNodeId ? edge.target : edge.source;
+                nodeVisibilityMap[targetNodeId] = !nodeVisibilityMap[targetNodeId];
+              });
+
+              myChart.setOption({
+                series: [{
+                  type: 'graph',
+                  layout: 'force',
+                  symbolSize: 30,
+                  roam: true,
+                  label: {
+                    show: true
+                  },
+                  edgeSymbol: ['none', 'arrow'],
+                  edgeSymbolSize: [4, 10],
+                  data: nodes.filter(node => nodeVisibilityMap[node.id] !== false),
+                  links: edges.filter(edge => {
+                    const sourceVisible = nodeVisibilityMap[edge.source] !== false;
+                    const targetVisible = nodeVisibilityMap[edge.target] !== false;
+                    return sourceVisible && targetVisible;
+                  }),
+                  lineStyle: {
+                    color: 'source',
+                    curveness: 0.3
+                  }
+                }]
+              });
+            } else {
+              currentCenterNodeId = clickedNodeId;
+              const relatedNodes = edges.filter(edge => edge.source === currentCenterNodeId || edge.target === currentCenterNodeId);
+              relatedNodes.forEach(edge => {
+                const targetNodeId = edge.source === currentCenterNodeId ? edge.target : edge.source;
+                nodeVisibilityMap[targetNodeId] = true;
+              });
+
+              myChart.setOption({
+                series: [{
+                  type: 'graph',
+                  layout: 'force',
+                  symbolSize: 50,
+                  roam: true,
+                  label: {
+                    show: true
+                  },
+                  edgeSymbol: ['none', 'arrow'],
+                  edgeSymbolSize: [4, 10],
+                  data: nodes.filter(node => nodeVisibilityMap[node.id] !== false),
+                  links: edges.filter(edge => {
+                    const sourceVisible = nodeVisibilityMap[edge.source] !== false;
+                    const targetVisible = nodeVisibilityMap[edge.target] !== false;
+                    return sourceVisible && targetVisible;
+                  }),
+                  lineStyle: {
+                    color: 'source',
+                    curveness: 0.3
+                  }
+                }]
+              });
+            }
+          });
+        } else {
+          console.error('数据获取失败');
+        }
+      } catch (error) {
+        console.error('请求出错', error);
+      }
+    });
+  </script>
+</body>
+
+</html>
